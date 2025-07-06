@@ -4,20 +4,45 @@ from .models import Ticket
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from fastapi import HTTPException
+import asyncio
+try:
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+    redis_client = redis.Redis(host="localhost", port=6379, db=0)
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis_client = None
 
-# URLs
+in_memory_cache = {}
+CACHE_TTL = 60  
+
+
 TICKETS_URL = "https://dummyjson.com/todos"
 USERS_URL = "https://dummyjson.com/users"
 
-# Security config (load from .env or fallback)
+
 SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Priority levels
+
 PRIORITY_LEVELS = ["low", "medium", "high"]
 
 async def fetch_tickets() -> list[Ticket]:
+    cache_key = "tickets_data"
+
+    # Try Redis first
+    if REDIS_AVAILABLE:
+        cached = await redis_client.get(cache_key)
+        if cached:
+            return Ticket.parse_raw(cached)
+
+    # Try in-memory cache
+    cached = in_memory_cache.get(cache_key)
+    if cached and (datetime.utcnow() - cached["time"]).total_seconds() < CACHE_TTL:
+        return cached["data"]
+
+    # Fetch from API
     try:
         async with httpx.AsyncClient() as client:
             todos_resp = await client.get(TICKETS_URL, timeout=5.0)
@@ -44,7 +69,15 @@ async def fetch_tickets() -> list[Ticket]:
         )
         tickets.append(ticket)
 
+    # Cache in Redis
+    if REDIS_AVAILABLE:
+        await redis_client.setex(cache_key, CACHE_TTL, Ticket.schema_json(tickets))
+
+    # Cache in-memory
+    in_memory_cache[cache_key] = {"data": tickets, "time": datetime.utcnow()}
+
     return tickets
+
 
 async def login_user(username: str, password: str):
     try:

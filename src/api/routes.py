@@ -40,3 +40,29 @@ async def search_tickets(q: str):
     tickets = await fetch_tickets()
     results = [t.dict() for t in tickets if q.lower() in t.title.lower()]
     return results
+
+@router.get("/stats")
+async def get_stats():
+    tickets = await fetch_tickets()
+
+    total = len(tickets)
+    open_tickets = len([t for t in tickets if t.status == "open"])
+    closed_tickets = total - open_tickets
+
+    priority_counts = {"low": 0, "medium": 0, "high": 0}
+    assignee_counts = {}
+
+    for t in tickets:
+        priority_counts[t.priority] += 1
+        assignee_counts[t.assignee] = assignee_counts.get(t.assignee, 0) + 1
+
+    top_assignee = max(assignee_counts.items(), key=lambda x: x[1])[0]
+
+    return {
+        "total_tickets": total,
+        "open": open_tickets,
+        "closed": closed_tickets,
+        "priority_distribution": priority_counts,
+        "top_assignee": top_assignee
+    }
+

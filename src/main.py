@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from .services import fetch_tickets  
 from .api.routes import router as api_router
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI(title="TicketHub", version="1.0")
 app.include_router(api_router)

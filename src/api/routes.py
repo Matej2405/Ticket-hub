@@ -1,17 +1,21 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import Optional
-from ..services import fetch_tickets
+from ..services import fetch_tickets, login_user, verify_token
 from ..models import Ticket
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
 router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 @router.get("/tickets")
 async def get_tickets(
     page: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
     status: Optional[str] = Query(None, regex="^(open|closed)$"),
-    priority: Optional[str] = Query(None, regex="^(low|medium|high)$")
+    priority: Optional[str] = Query(None, regex="^(low|medium|high)$"),
+    token: str = Depends(oauth2_scheme)
 ):
+    verify_token(token)
     tickets = await fetch_tickets()
 
     # Filteriraj
@@ -28,7 +32,8 @@ async def get_tickets(
     return [t.dict() for t in paginated]
 
 @router.get("/tickets/{ticket_id}")
-async def get_ticket(ticket_id: int):
+async def get_ticket(ticket_id: int, token: str = Depends(oauth2_scheme)):
+    verify_token(token)
     tickets = await fetch_tickets()
     for t in tickets:
         if t.id == ticket_id:
@@ -36,27 +41,32 @@ async def get_ticket(ticket_id: int):
     raise HTTPException(status_code=404, detail="Ticket not found")
 
 @router.get("/tickets/search")
-async def search_tickets(q: str):
+async def search_tickets(q: str, token: str = Depends(oauth2_scheme)):
+    verify_token(token)
     tickets = await fetch_tickets()
     results = [t.dict() for t in tickets if q.lower() in t.title.lower()]
     return results
 
 @router.get("/stats")
-async def get_stats():
+async def get_stats(token: str = Depends(oauth2_scheme)):
+    verify_token(token)
     tickets = await fetch_tickets()
 
     total = len(tickets)
-    open_tickets = len([t for t in tickets if t.status == "open"])
-    closed_tickets = total - open_tickets
-
+    open_tickets = 0
+    closed_tickets = 0
     priority_counts = {"low": 0, "medium": 0, "high": 0}
     assignee_counts = {}
 
     for t in tickets:
+        if t.status == "open":
+            open_tickets += 1
+        else:
+            closed_tickets += 1
         priority_counts[t.priority] += 1
         assignee_counts[t.assignee] = assignee_counts.get(t.assignee, 0) + 1
 
-    top_assignee = max(assignee_counts.items(), key=lambda x: x[1])[0]
+    top_assignee = max(assignee_counts.items(), key=lambda x: x[1])[0] if assignee_counts else None
 
     return {
         "total_tickets": total,
@@ -66,3 +76,9 @@ async def get_stats():
         "top_assignee": top_assignee
     }
 
+@router.post("/auth/login")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    token = await login_user(form_data.username, form_data.password)
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return token

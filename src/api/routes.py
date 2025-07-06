@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import Optional
-from ..services import fetch_tickets, login_user, verify_token
+from ..services import fetch_tickets, login_user, verify_token, redis_client
 from ..models import Ticket
 from ..main import limiter
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -88,3 +88,29 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if not token:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return token
+
+@router.get("/health", include_in_schema=False)
+async def health_check():
+    # Provjera DummyJSON API-ja
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("https://dummyjson.com/todos", timeout=3.0)
+            resp.raise_for_status()
+        dummyjson_status = "ok"
+    except Exception:
+        dummyjson_status = "unreachable"
+
+    # Provjera Redis-a (ako postoji)
+    redis_status = "not configured"
+    if redis_client:
+        try:
+            pong = await redis_client.ping()
+            redis_status = "ok" if pong else "unreachable"
+        except Exception:
+            redis_status = "unreachable"
+
+    return {
+        "api": "ok",
+        "dummyjson": dummyjson_status,
+        "redis": redis_status
+    }

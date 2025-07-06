@@ -9,7 +9,13 @@ from slowapi import _rate_limit_exceeded_handler
 load_dotenv()
 
 # Create FastAPI app
-app = FastAPI(title="TicketHub API 🎟️", version="1.0")
+app = FastAPI(
+    title="🎟️ TicketHub API",
+    description="A REST API for managing tickets with DummyJSON integration.",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 app.include_router(api_router)
 
 # Rate limiting setup

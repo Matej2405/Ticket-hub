@@ -6,6 +6,13 @@ from datetime import datetime, timedelta, UTC
 from fastapi import HTTPException
 import asyncio
 import json
+from dotenv import load_dotenv
+
+load_dotenv()  # Load env vars from .env
+SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
 try:
     import redis.asyncio as redis

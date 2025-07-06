@@ -1,73 +1,84 @@
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Query, HTTPException, Depends, Request
 from typing import Optional
-from ..services import fetch_tickets, login_user, verify_token, redis_client
-from ..models import Ticket
-from ..main import limiter
+from src.services import fetch_tickets, login_user, verify_token, redis_client
+from src.models import Ticket
+from src.extensions import limiter
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+import httpx
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
+
 @router.get("/tickets")
-@limiter.limit("10/second")  # Rate limit to prevent abuse
+@limiter.limit("10/second")
 async def get_tickets(
+    request: Request,
     page: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
-    status: Optional[str] = Query(None, regex="^(open|closed)$"),
-    priority: Optional[str] = Query(None, regex="^(low|medium|high)$"),
+    status: Optional[str] = Query(None, pattern="^(open|closed)$"),
+    priority: Optional[str] = Query(None, pattern="^(low|medium|high)$"),
     token: str = Depends(oauth2_scheme)
 ):
     verify_token(token)
     tickets = await fetch_tickets()
 
-    # Filteriraj
     if status:
         tickets = [t for t in tickets if t.status == status]
     if priority:
         tickets = [t for t in tickets if t.priority == priority]
 
-    # Paginacija
     start = (page - 1) * size
     end = start + size
     paginated = tickets[start:end]
 
-    return [t.dict() for t in paginated]
+    return [t.model_dump() for t in paginated]
+
 
 @router.get("/tickets/{ticket_id}")
-@limiter.limit("10/second")  # Rate limit to prevent abuse
-async def get_ticket(ticket_id: int, token: str = Depends(oauth2_scheme)):
+@limiter.limit("10/second")
+async def get_ticket(
+    request: Request,
+    ticket_id: int,
+    token: str = Depends(oauth2_scheme)
+):
     verify_token(token)
     tickets = await fetch_tickets()
     for t in tickets:
         if t.id == ticket_id:
-            return t.dict()
+            return t.model_dump()
     raise HTTPException(status_code=404, detail="Ticket not found")
 
+
 @router.get("/tickets/search")
-@limiter.limit("10/second")  # Rate limit to prevent abuse
-async def search_tickets(q: str, token: str = Depends(oauth2_scheme)):
+@limiter.limit("10/second")
+async def search_tickets(
+    request: Request,
+    q: str,
+    token: str = Depends(oauth2_scheme)
+):
     verify_token(token)
     tickets = await fetch_tickets()
-    results = [t.dict() for t in tickets if q.lower() in t.title.lower()]
+    results = [t.model_dump() for t in tickets if q.lower() in t.title.lower()]
     return results
 
+
 @router.get("/stats")
-@limiter.limit("10/second")  # Rate limit to prevent abuse
-async def get_stats(token: str = Depends(oauth2_scheme)):
+@limiter.limit("10/second")
+async def get_stats(
+    request: Request,
+    token: str = Depends(oauth2_scheme)
+):
     verify_token(token)
     tickets = await fetch_tickets()
 
     total = len(tickets)
-    open_tickets = 0
-    closed_tickets = 0
+    open_tickets = sum(1 for t in tickets if t.status == "open")
+    closed_tickets = total - open_tickets
     priority_counts = {"low": 0, "medium": 0, "high": 0}
     assignee_counts = {}
 
     for t in tickets:
-        if t.status == "open":
-            open_tickets += 1
-        else:
-            closed_tickets += 1
         priority_counts[t.priority] += 1
         assignee_counts[t.assignee] = assignee_counts.get(t.assignee, 0) + 1
 
@@ -81,17 +92,21 @@ async def get_stats(token: str = Depends(oauth2_scheme)):
         "top_assignee": top_assignee
     }
 
+
 @router.post("/auth/login")
-@limiter.limit("10/second")  # Rate limit to prevent abuse
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+@limiter.limit("5/second")  # Stricter rate limit for login
+async def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
     token = await login_user(form_data.username, form_data.password)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return token
 
+
 @router.get("/health", include_in_schema=False)
-async def health_check():
-    # Provjera DummyJSON API-ja
+async def health_check(request: Request):
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get("https://dummyjson.com/todos", timeout=3.0)
@@ -100,7 +115,6 @@ async def health_check():
     except Exception:
         dummyjson_status = "unreachable"
 
-    # Provjera Redis-a (ako postoji)
     redis_status = "not configured"
     if redis_client:
         try:

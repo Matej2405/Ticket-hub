@@ -2,12 +2,14 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import Optional
 from ..services import fetch_tickets, login_user, verify_token
 from ..models import Ticket
+from ..main import limiter
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 @router.get("/tickets")
+@limiter.limit("10/second")  # Rate limit to prevent abuse
 async def get_tickets(
     page: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
@@ -32,6 +34,7 @@ async def get_tickets(
     return [t.dict() for t in paginated]
 
 @router.get("/tickets/{ticket_id}")
+@limiter.limit("10/second")  # Rate limit to prevent abuse
 async def get_ticket(ticket_id: int, token: str = Depends(oauth2_scheme)):
     verify_token(token)
     tickets = await fetch_tickets()
@@ -41,6 +44,7 @@ async def get_ticket(ticket_id: int, token: str = Depends(oauth2_scheme)):
     raise HTTPException(status_code=404, detail="Ticket not found")
 
 @router.get("/tickets/search")
+@limiter.limit("10/second")  # Rate limit to prevent abuse
 async def search_tickets(q: str, token: str = Depends(oauth2_scheme)):
     verify_token(token)
     tickets = await fetch_tickets()
@@ -48,6 +52,7 @@ async def search_tickets(q: str, token: str = Depends(oauth2_scheme)):
     return results
 
 @router.get("/stats")
+@limiter.limit("10/second")  # Rate limit to prevent abuse
 async def get_stats(token: str = Depends(oauth2_scheme)):
     verify_token(token)
     tickets = await fetch_tickets()
@@ -77,6 +82,7 @@ async def get_stats(token: str = Depends(oauth2_scheme)):
     }
 
 @router.post("/auth/login")
+@limiter.limit("10/second")  # Rate limit to prevent abuse
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     token = await login_user(form_data.username, form_data.password)
     if not token:
